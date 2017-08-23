@@ -25,6 +25,12 @@ namespace Articulate.Controllers
 {
     public class MardownEditorApiController : UmbracoAuthorizedApiController
     {
+        public class ParseImageResponse
+        {
+            public string BodyText { get; set; }
+            public string FirstImage { get; set; }
+        }
+
         public async Task<HttpResponseMessage> PostNew()
         {
             if (!Request.Content.IsMimeMultipartContent())
@@ -62,6 +68,13 @@ namespace Articulate.Controllers
                 CleanFiles(multiPartRequest);
                 throw new HttpResponseException(Request.CreateErrorResponse(HttpStatusCode.Forbidden, "No Articulate node found with the specified id"));
             }
+
+            var extractFirstImageAsProperty = true;
+            if (articulateNode.HasProperty("extractFirstImage"))
+            {
+                extractFirstImageAsProperty = articulateNode.GetValue<bool>("extractFirstImage");
+            }
+
             var archive = Services.ContentService.GetChildren(model.ArticulateNodeId.Value)
                 .FirstOrDefault(x => x.ContentType.Alias.InvariantEquals("ArticulateArchive"));
             if (archive == null)
@@ -79,7 +92,9 @@ namespace Articulate.Controllers
             }
 
             //parse out the images, we may be posting more than is in the body
-            model.Body = ParseImages(model.Body, multiPartRequest);
+            var parsedImageResponse = ParseImages(model.Body, multiPartRequest, extractFirstImageAsProperty);
+
+            model.Body = parsedImageResponse.BodyText;
 
             var content = Services.ContentService.CreateContent(
                 model.Title,
@@ -88,6 +103,12 @@ namespace Articulate.Controllers
                 Security.GetUserId());
 
             content.SetValue("markdown", model.Body);
+
+            if (!string.IsNullOrEmpty(parsedImageResponse.FirstImage))
+            {
+                content.SetValue("postImage", parsedImageResponse.FirstImage);
+            }
+
             if (model.Excerpt.IsNullOrWhiteSpace() == false)
             {
                 content.SetValue("excerpt", model.Excerpt);
@@ -137,9 +158,10 @@ namespace Articulate.Controllers
             }
         }
 
-        private static string ParseImages(string body, MultipartFileStreamProvider multiPartRequest)
+        private static ParseImageResponse ParseImages(string body, MultipartFileStreamProvider multiPartRequest, bool extractFirstImageAsProperty)
         {
-            return Regex.Replace(body, @"\[i:(\d+)\:(.*?)]", m =>
+            var firstImage = string.Empty;
+            var bodyText = Regex.Replace(body, @"\[i:(\d+)\:(.*?)]", m =>
             {
                 var index = m.Groups[1].Value.TryConvertTo<int>();
                 if (index)
@@ -157,7 +179,15 @@ namespace Articulate.Controllers
                         var result = string.Format("![{0}]({1})",
                             savedFile.Url,
                             savedFile.Url
-                            );
+                        );
+
+                        if (extractFirstImageAsProperty && string.IsNullOrEmpty(firstImage))
+                        {
+                            firstImage = savedFile.Url;
+                            //in this case, we've extracted the image, we don't want it to be displayed
+                            // in the content too so don't return it.
+                            return string.Empty;
+                        }
 
                         return result;
                     }
@@ -165,6 +195,8 @@ namespace Articulate.Controllers
 
                 return m.Value;
             });
+
+            return new ParseImageResponse { BodyText = bodyText, FirstImage = firstImage };
         }
 
         private static bool CheckPermissions(IUser user, IUserService userService, char[] permissionsToCheck, IContent contentItem)

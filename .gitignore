@@ -45,3 +45,6 @@ src/_ReSharper.Caches/*
 src/Articulate.Web/config/imageprocessor/cache.config
 src/Articulate.Web/config/imageprocessor/processing.config
 src/Articulate.Web/config/imageprocessor/security.config
+/build/tmp/*
+/build/vswhere.exe
+/build/Release/*
